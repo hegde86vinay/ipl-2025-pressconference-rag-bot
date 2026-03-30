@@ -1,0 +1,275 @@
+name: Claude Auto-Implement Review Suggestions
+
+on:
+  workflow_run:
+    workflows: ["Claude Code Review (Fresh Eyes)"]
+    types: [completed]
+
+jobs:
+  implement-suggestions:
+    name: Implement Claude Suggestions
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      # ── Step 1: Resolve which PR triggered the upstream review ──────────────
+      - name: Resolve PR number and branch
+        id: pr_info
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          python3 << 'PYEOF'
+          import os, json, urllib.request
+
+          token = os.environ["GH_TOKEN"]
+          repo  = os.environ["REPO"]
+          sha   = os.environ["HEAD_SHA"]
+
+          def gh_get(path):
+              req = urllib.request.Request(
+                  f"https://api.github.com/repos/{repo}{path}",
+                  headers={"Authorization": f"Bearer {token}",
+                           "Accept": "application/vnd.github.v3+json"}
+              )
+              with urllib.request.urlopen(req) as r:
+                  return json.loads(r.read())
+
+          prs = gh_get("/pulls?state=open&per_page=20")
+          pr  = next((p for p in prs if p["head"]["sha"] == sha), None)
+
+          out = open(os.environ["GITHUB_OUTPUT"], "a")
+          if not pr:
+              print("No open PR found for this SHA — skipping.")
+              out.write("skip=true\n")
+          else:
+              print(f"Found PR #{pr['number']} on branch {pr['head']['ref']}")
+              out.write(f"pr_number={pr['number']}\n")
+              out.write(f"branch={pr['head']['ref']}\n")
+              out.write("skip=false\n")
+          out.close()
+          PYEOF
+
+      # ── Step 2: Checkout the feature branch ─────────────────────────────────
+      - name: Checkout PR branch
+        if: steps.pr_info.outputs.skip != 'true'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.pr_info.outputs.branch }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      # ── Step 3: Pull the Claude review comment off the PR ───────────────────
+      - name: Fetch Claude review comment from PR
+        if: steps.pr_info.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ steps.pr_info.outputs.pr_number }}
+        run: |
+          python3 << 'PYEOF'
+          import os, json, urllib.request
+
+          token = os.environ["GH_TOKEN"]
+          repo  = os.environ["REPO"]
+          pr    = os.environ["PR_NUMBER"]
+
+          req = urllib.request.Request(
+              f"https://api.github.com/repos/{repo}/issues/{pr}/comments",
+              headers={"Authorization": f"Bearer {token}",
+                       "Accept": "application/vnd.github.v3+json"}
+          )
+          with urllib.request.urlopen(req) as r:
+              comments = json.loads(r.read())
+
+          review = next(
+              (c["body"] for c in reversed(comments) if "🤖 Claude Code Review" in c.get("body", "")),
+              None
+          )
+
+          with open("review.txt", "w") as f:
+              f.write(review or "")
+
+          print(f"Review found: {len(review)} chars" if review else "No Claude review comment found.")
+          PYEOF
+
+      # ── Step 4: Call Claude (implementer) with code + review ─────────────────
+      - name: Implement suggestions via Claude API
+        if: steps.pr_info.outputs.skip != 'true'
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          python3 << 'PYEOF'
+          import os, json, re, subprocess, urllib.request
+
+          with open("review.txt") as f:
+              review = f.read().strip()
+
+          if not review:
+              print("No review — nothing to implement.")
+              open("impl_summary.txt", "w").write("No review comment found.")
+              open("changed_files.txt", "w").close()
+              exit(0)
+
+          # Collect Python files that are new or changed in this PR
+          result = subprocess.run(
+              ["git", "diff", "origin/main...HEAD", "--name-only"],
+              capture_output=True, text=True
+          )
+          changed = [
+              f for f in result.stdout.strip().split("\n")
+              if f.endswith(".py") and os.path.exists(f)
+          ]
+          files_content = {fp: open(fp).read() for fp in changed}
+
+          prompt = f"""You are a software engineer implementing code review feedback.
+
+          CODE REVIEW (from a fresh-eyes reviewer):
+          {review}
+
+          CURRENT FILE CONTENTS (only files changed in this PR):
+          {json.dumps(files_content, indent=2)}
+
+          RULES:
+          - Implement ONLY suggestions from the '💡 Suggestions' and '🐛 Bugs' sections
+          - Do NOT change files or logic that was not flagged
+          - Do NOT create new files — only modify existing ones
+          - Preserve all existing passing tests
+          - Return ONLY valid JSON — no markdown fences, no preamble
+
+          REQUIRED OUTPUT FORMAT:
+          {{
+            "changes": [
+              {{"file": "relative/path/to/file.py", "content": "complete updated file content"}}
+            ],
+            "summary": "- bullet list of each change made and the review point it addresses"
+          }}"""
+
+          payload = {
+              "model": "claude-haiku-4-5-20251001",
+              "max_tokens": 4096,
+              "system": (
+                  "You are a careful software engineer implementing specific code review suggestions. "
+                  "You output ONLY valid JSON in the exact format requested. "
+                  "No markdown, no explanation outside the JSON object."
+              ),
+              "messages": [{"role": "user", "content": prompt}]
+          }
+
+          req = urllib.request.Request(
+              "https://api.anthropic.com/v1/messages",
+              data=json.dumps(payload).encode(),
+              headers={
+                  "x-api-key": os.environ["ANTHROPIC_API_KEY"],
+                  "anthropic-version": "2023-06-01",
+                  "content-type": "application/json"
+              }
+          )
+
+          with urllib.request.urlopen(req) as resp:
+              result = json.loads(resp.read())
+
+          raw = result["content"][0]["text"].strip()
+          raw = re.sub(r"^```json\s*", "", raw)
+          raw = re.sub(r"\s*```$",     "", raw)
+
+          try:
+              data = json.loads(raw)
+          except json.JSONDecodeError:
+              m = re.search(r'\{.*\}', raw, re.DOTALL)
+              data = json.loads(m.group()) if m else {"changes": [], "summary": "Could not parse response."}
+
+          written = []
+          for change in data.get("changes", []):
+              fp = change["file"]
+              if os.path.exists(fp):          # safety: never create new files
+                  with open(fp, "w") as f:
+                      f.write(change["content"])
+                  written.append(fp)
+                  print(f"  Updated: {fp}")
+              else:
+                  print(f"  Skipped (not in PR): {fp}")
+
+          open("impl_summary.txt", "w").write(data.get("summary", "No summary."))
+          open("changed_files.txt", "w").write("\n".join(written))
+          print(f"Claude updated {len(written)} file(s).")
+          PYEOF
+
+      # ── Step 5: Run tests to confirm nothing broke ───────────────────────────
+      - name: Install test dependencies
+        if: steps.pr_info.outputs.skip != 'true'
+        run: pip install pytest tiktoken --quiet
+
+      - name: Run tests
+        if: steps.pr_info.outputs.skip != 'true'
+        id: tests
+        run: |
+          pytest tests/ -v --tb=short 2>&1 | tee test_output.txt
+          echo "exit_code=${PIPESTATUS[0]}" >> $GITHUB_OUTPUT
+
+      # ── Step 6: Commit only if tests passed ─────────────────────────────────
+      - name: Commit implemented changes to feature branch
+        if: steps.pr_info.outputs.skip != 'true'
+        id: commit
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          FILES=$(cat changed_files.txt)
+          if [ -z "$FILES" ] || [ "${{ steps.tests.outputs.exit_code }}" != "0" ]; then
+            echo "committed=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          git config user.name  "claude-implement-bot"
+          git config user.email "claude-bot@users.noreply.github.com"
+          git add $FILES
+          git diff --cached --quiet && echo "committed=false" >> $GITHUB_OUTPUT && exit 0
+          git commit -m "Auto-implement Claude review suggestions (all tests passing)"
+          git push
+          echo "committed=true" >> $GITHUB_OUTPUT
+
+      # ── Step 7: Post outcome comment on the PR ───────────────────────────────
+      - name: Post implementation report on PR
+        if: steps.pr_info.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ steps.pr_info.outputs.pr_number }}
+          TEST_EXIT: ${{ steps.tests.outputs.exit_code }}
+          COMMITTED:  ${{ steps.commit.outputs.committed }}
+        run: |
+          SUMMARY=$(cat impl_summary.txt)
+          TEST_OUT=$(cat test_output.txt | tail -30)
+          FILES=$(cat changed_files.txt | tr '\n' ' ')
+
+          if [ "$TEST_EXIT" = "0" ] && [ "$COMMITTED" = "true" ]; then
+            BADGE="✅ Suggestions implemented — all tests passing"
+            ACTION="Changes have been **committed to this branch**. Please review the diff above."
+          elif [ "$TEST_EXIT" = "0" ] && [ "$COMMITTED" = "false" ]; then
+            BADGE="ℹ️ No actionable changes identified"
+            ACTION="Claude found no specific bugs or suggestions to implement, or the diff was already optimal."
+          else
+            BADGE="❌ Implementation attempted — tests failed, changes NOT committed"
+            ACTION="The suggested changes caused test failures. **No commit was made.** Manual review required."
+          fi
+
+          gh pr comment $PR_NUMBER --body "## 🤖 Claude Implementation Report
+
+          **${BADGE}**
+          **Files modified:** \`${FILES:-none}\`
+
+          ### What Was Changed
+          ${SUMMARY}
+
+          ### Test Results
+          \`\`\`
+          ${TEST_OUT}
+          \`\`\`
+
+          ### Next Step
+          ${ACTION}
+
+          ---
+          *Auto-implemented by Claude \`claude-haiku-4-5-20251001\` · [View run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})*"
