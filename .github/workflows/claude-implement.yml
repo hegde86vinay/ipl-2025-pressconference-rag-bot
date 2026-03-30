@@ -194,8 +194,12 @@ jobs:
               else:
                   print(f"  Skipped (not in PR): {fp}")
 
-          open("impl_summary.txt", "w").write(data.get("summary", "No summary."))
-          open("changed_files.txt", "w").write("\n".join(written))
+          # Guard: Claude may return summary as a list instead of a string
+          summary = data.get("summary", "No summary.")
+          if isinstance(summary, list):
+              summary = "\n".join(f"- {s}" if not str(s).startswith("-") else str(s) for s in summary)
+          open("impl_summary.txt", "w").write(str(summary))
+          open("changed_files.txt", "w").write("\n".join(str(f) for f in written))
           print(f"Claude updated {len(written)} file(s).")
           PYEOF
 
