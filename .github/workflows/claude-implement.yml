@@ -151,7 +151,7 @@ jobs:
 
           payload = {
               "model": "claude-haiku-4-5-20251001",
-              "max_tokens": 4096,
+              "max_tokens": 8096,
               "system": (
                   "You are a careful software engineer implementing specific code review suggestions. "
                   "You output ONLY valid JSON in the exact format requested. "
@@ -180,8 +180,16 @@ jobs:
           try:
               data = json.loads(raw)
           except json.JSONDecodeError:
-              m = re.search(r'\{.*\}', raw, re.DOTALL)
-              data = json.loads(m.group()) if m else {"changes": [], "summary": "Could not parse response."}
+              # Response may be truncated — try extracting the outermost JSON object
+              try:
+                  m = re.search(r'\{.*\}', raw, re.DOTALL)
+                  data = json.loads(m.group()) if m else {}
+              except (json.JSONDecodeError, AttributeError):
+                  data = {}
+          # Final safety net — always produce a valid structure
+          if not data or "changes" not in data:
+              print("WARNING: Claude response could not be parsed (likely truncated). No changes applied.")
+              data = {"changes": [], "summary": "Response truncated or unparseable — no changes applied. Review suggestions manually."}
 
           written = []
           for change in data.get("changes", []):
