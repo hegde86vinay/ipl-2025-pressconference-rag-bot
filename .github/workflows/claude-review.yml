@@ -20,13 +20,49 @@ jobs:
         with:
           fetch-depth: 0
 
+      # ── Loop-breaker: skip automated review if last commit was by the implement bot ──
+      - name: Check if triggered by claude-implement-bot
+        id: bot_check
+        run: |
+          LAST_AUTHOR=$(git log -1 --format='%an')
+          LAST_MSG=$(git log -1 --format='%s')
+          echo "Last commit author : $LAST_AUTHOR"
+          echo "Last commit message: $LAST_MSG"
+          if [ "$LAST_AUTHOR" = "claude-implement-bot" ]; then
+            echo "is_bot_commit=true"  >> $GITHUB_OUTPUT
+          else
+            echo "is_bot_commit=false" >> $GITHUB_OUTPUT
+          fi
+
+      # ── If bot commit: skip Claude review, just flag for human attention ──
+      - name: Notify PR — awaiting human review after auto-implement
+        if: steps.bot_check.outputs.is_bot_commit == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh pr comment ${{ github.event.pull_request.number }} --body "## 👤 Human Review Required
+
+          Claude has automatically implemented the review suggestions and committed the changes to this branch.
+
+          **Automated review is skipped for bot commits** to prevent an infinite review → implement loop.
+
+          ### What to do next
+          - [ ] Review the changes Claude committed (see latest commit in this PR)
+          - [ ] Run tests locally if needed: \`pytest tests/ -v\`
+          - [ ] Approve and merge, or request further changes manually
+
+          ---
+          *Loop-breaker: \`claude-review\` detected commit by \`claude-implement-bot\` and skipped re-review.*"
+
       - name: Generate PR diff
+        if: steps.bot_check.outputs.is_bot_commit != 'true'
         run: |
           git diff origin/main...HEAD > pr_diff.txt
           echo "Diff lines: $(wc -l < pr_diff.txt)"
           echo "Diff chars: $(wc -c < pr_diff.txt)"
 
       - name: Run Claude Fresh-Eyes Review
+        if: steps.bot_check.outputs.is_bot_commit != 'true'
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           PR_TITLE: ${{ github.event.pull_request.title }}
@@ -117,6 +153,7 @@ jobs:
           PYEOF
 
       - name: Post review comment on PR
+        if: steps.bot_check.outputs.is_bot_commit != 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
