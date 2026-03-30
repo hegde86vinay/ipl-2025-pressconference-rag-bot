@@ -1,6 +1,9 @@
 """
-IPL 2025 Press Conference Scraper (3 sources)
-Run: python scraper.py
+IPL 2025 Press Conference Scraper — updated sources
+  Source A: Indian Express IPL section   (replaces ESPNcricinfo — was 403)
+  Source B: Times of India IPL           (replaces Cricbuzz — was JS-only)
+  Source C: Indian Express player tags   (deep per-player interview content)
+Run: python scraper.py   (~20-35 mins, targeting 60-80 docs)
 """
 
 import json, os, re, time
@@ -17,15 +20,20 @@ os.makedirs("data/chunks", exist_ok=True)
 
 session = requests.Session()
 session.headers.update(config.REQUEST_HEADERS)
+
 scraped_count = 0
+seen_urls: set = set()          # dedup across all sources
 
 
-def log(msg):
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+def log(msg: str):
     with open(config.LOG_FILE, "a") as f:
         f.write(f"[{datetime.now():%Y-%m-%d %H:%M:%S}] {msg}\n")
 
 
-def safe_get(url):
+def safe_get(url: str):
+    """GET with graceful error handling; returns BeautifulSoup or None."""
     try:
         r = session.get(url, timeout=15)
         if r.status_code in (403, 404):
@@ -38,110 +46,214 @@ def safe_get(url):
         return None
 
 
-def slugify(text):
+def slugify(text: str) -> str:
     return re.sub(r"[^\w-]", "-", text.lower())[:60].strip("-")
 
 
-def clean_text(soup):
-    for t in soup(["script", "style", "nav", "header", "footer"]):
-        t.decompose()
+def clean_text(soup: BeautifulSoup) -> str:
+    """Strip boilerplate tags and return normalised plain text."""
+    for tag in soup(["script", "style", "nav", "header", "footer",
+                     "aside", "form", "iframe", "noscript"]):
+        tag.decompose()
     return " ".join(soup.get_text(" ", strip=True).split())
 
 
-def save_article(text, meta):
+def extract_teams(text: str) -> list:
+    return [t for t in config.IPL_TEAMS if t in text.upper()]
+
+
+def save_article(text: str, meta: dict) -> bool:
     global scraped_count
-    if len(text.split()) < config.MIN_DOC_WORDS:
+    words = len(text.split())
+    if words < config.MIN_DOC_WORDS:
+        log(f"SKIP too short ({words} words): {meta.get('source_url','')[:80]}")
         return False
     slug = slugify(meta.get("title", "article"))
     base, n = f"{config.DATA_DIR}{slug}", 0
     while os.path.exists(f"{base}.txt"):
-        n += 1; base = f"{config.DATA_DIR}{slug}-{n}"
-    open(f"{base}.txt", "w").write(text)
-    json.dump(meta, open(f"{base}.json", "w"), indent=2)
+        n += 1
+        base = f"{config.DATA_DIR}{slug}-{n}"
+    with open(f"{base}.txt", "w", encoding="utf-8") as f:
+        f.write(text)
+    with open(f"{base}.json", "w", encoding="utf-8") as f:
+        json.dump(meta, f, indent=2)
     scraped_count += 1
-    print(f"Scraped {scraped_count}/~70: {meta.get('title','')[:60]}")
+    print(f"  Scraped {scraped_count}/~70: {meta.get('title','')[:65]}")
     return True
 
 
-def default_meta(url, title, source):
-    return {"source_url": url, "title": title, "date": datetime.now().strftime("%Y-%m-%d"),
-            "teams": [], "match_number": "", "author": "", "source": source}
+def default_meta(url: str, title: str, source: str, text: str = "") -> dict:
+    return {
+        "source_url":   url,
+        "title":        title,
+        "date":         datetime.now().strftime("%Y-%m-%d"),
+        "teams":        extract_teams(title + " " + text[:400]),
+        "match_number": "",
+        "author":       "",
+        "source":       source,
+    }
 
-def scrape_page(url, source_tag):
+
+def scrape_article(url: str, source_tag: str):
+    """Fetch a single article URL, extract text, and save."""
+    if url in seen_urls:
+        return
+    seen_urls.add(url)
+
     soup = safe_get(url)
     time.sleep(config.REQUEST_DELAY)
-    if not soup: return
+    if not soup:
+        return
+
     h1 = soup.find("h1")
     title = h1.get_text(strip=True) if h1 else url
-    article = (soup.find("article")
-               or soup.find(class_=re.compile(r"article|story|report|content", re.I))
-               or soup.find("main"))
-    save_article(clean_text(article or soup), default_meta(url, title, source_tag))
 
-def collect_links(index_url, domain, path_fragment, filter_kws=None):
-    soup = safe_get(index_url)
-    if not soup: return set()
-    links = set()
-    for a in soup.find_all("a", href=True):
-        href = a["href"]
-        if path_fragment in href:
-            full = urljoin(domain, href)
-            if not filter_kws or any(k in (href + a.get_text()).lower() for k in filter_kws):
-                links.add(full)
-    return links
+    # Prefer semantic article containers; fall back to <main> then full page
+    article = (
+        soup.find("div", class_=re.compile(
+            r"article[_-]?(body|content|text|details?)|"
+            r"story[_-]?(body|content|detail)|"
+            r"(normal|full)[_-]content", re.I))
+        or soup.find("article")
+        or soup.find("main")
+    )
+    text = clean_text(article or soup)
+    save_article(text, default_meta(url, title, source_tag, text))
 
 
-# ── Source A ──────────────────────────────────────────────────────────────────
+def collect_links(index_url: str, domain: str, path_fragment: str,
+                  filter_kws: list = None, max_pages: int = 3) -> set:
+    """
+    Crawl an index page (+ optional pagination) and return filtered article links.
+    Pagination tried via ?page=N — stops early if a page yields no new links.
+    """
+    all_links: set = set()
 
-def scrape_espn_match_reports():
-    print("\n── Source A: ESPNcricinfo match reports ──")
-    base = "https://www.espncricinfo.com"
-    links = collect_links(config.ESPNCRICINFO_RESULTS, base, "/series/ipl-2025-1449924/")
-    report_links = {
-        u.replace("/full-scorecard", "/match-report")
-        for u in links
-        if "full-scorecard" in u or "match-report" in u
-    }
-    log(f"Source A: {len(report_links)} match report URLs")
-    for url in sorted(report_links):
-        if scraped_count >= 70: break
-        scrape_page(url, "espncricinfo_match_report")
+    for page in range(1, max_pages + 1):
+        paged_url = index_url if page == 1 else f"{index_url}?page={page}"
+        soup = safe_get(paged_url)
+        time.sleep(config.REQUEST_DELAY)
+        if not soup:
+            break
+
+        new_on_page = 0
+        for a in soup.find_all("a", href=True):
+            href = a["href"]
+            if path_fragment not in href:
+                continue
+            full = urljoin(domain, href) if not href.startswith("http") else href
+            if full in all_links:
+                continue
+            anchor_text = a.get_text(" ", strip=True).lower()
+            if filter_kws and not any(k in href.lower() + " " + anchor_text
+                                      for k in filter_kws):
+                continue
+            all_links.add(full)
+            new_on_page += 1
+
+        if page > 1 and new_on_page == 0:
+            break                       # no new links — stop paginating
+
+    return all_links
 
 
-# ── Source B ──────────────────────────────────────────────────────────────────
+# ── Source A: Indian Express IPL section ─────────────────────────────────────
 
-def scrape_espn_news():
-    print("\n── Source B: ESPNcricinfo news / interviews ──")
-    base = "https://www.espncricinfo.com"
-    links = collect_links(config.ESPNCRICINFO_NEWS, base, "/story/",
-                          filter_kws=config.INTERVIEW_KEYWORDS)
-    links |= collect_links(config.ESPNCRICINFO_NEWS, base, "/news/",
-                           filter_kws=config.INTERVIEW_KEYWORDS)
-    log(f"Source B: {len(links)} news URLs")
+def scrape_indian_express_ipl():
+    print("\n── Source A: Indian Express IPL section ──")
+    domain   = "https://indianexpress.com"
+    path_frag = "/article/sports/cricket/"
+    kws = config.INTERVIEW_KEYWORDS + [
+        "ipl", "t20", "match", "final", "win", "loss", "trophy",
+        "rcb", "mi", "csk", "kkr", "pbks", "srh", "rr", "dc", "gt", "lsg",
+    ]
+
+    links: set = set()
+    for index_url in [config.INDIAN_EXPRESS_IPL, config.INDIAN_EXPRESS_IPL_TAG]:
+        found = collect_links(index_url, domain, path_frag,
+                              filter_kws=kws, max_pages=5)
+        links |= found
+        log(f"Source A [{index_url.split('/')[-2]}]: {len(found)} links")
+
+    log(f"Source A total: {len(links)} unique article URLs")
+    print(f"  Found {len(links)} articles — scraping ...")
+
     for url in sorted(links):
-        if scraped_count >= 70: break
-        scrape_page(url, "espncricinfo_news")
+        if scraped_count >= 70:
+            break
+        scrape_article(url, "indian_express")
 
 
-# ── Source C ──────────────────────────────────────────────────────────────────
+# ── Source B: Times of India IPL ─────────────────────────────────────────────
 
-def scrape_cricbuzz():
-    print("\n── Source C: Cricbuzz match reviews ──")
-    base = "https://www.cricbuzz.com"
-    kws = config.INTERVIEW_KEYWORDS + ["review", "report"]
-    links = collect_links(config.CRICBUZZ_NEWS, base, "/cricket-news/", filter_kws=kws)
-    links |= collect_links(config.CRICBUZZ_NEWS, base, "/cricket-match/", filter_kws=kws)
-    log(f"Source C: {len(links)} Cricbuzz URLs")
+def scrape_times_of_india():
+    print("\n── Source B: Times of India IPL ──")
+    domain = "https://timesofindia.indiatimes.com"
+    kws    = config.INTERVIEW_KEYWORDS + [
+        "ipl", "2025", "rcb", "mi", "csk", "kkr", "pbks",
+        "srh", "rr", "dc", "gt", "lsg", "captain", "coach",
+    ]
+
+    links: set = set()
+    # Require /sports/cricket/ipl/ in path to exclude entertainment/lifestyle
+    # articles that mention IPL only in passing
+    for path_frag in ["/sports/cricket/ipl/top-stories/",
+                      "/sports/cricket/ipl/t20-cricket/"]:
+        found = collect_links(config.TIMES_OF_INDIA_IPL, domain,
+                              path_frag, filter_kws=kws, max_pages=4)
+        links |= found
+        log(f"Source B [{path_frag.strip('/')}]: {len(found)} links")
+
+    log(f"Source B total: {len(links)} unique article URLs")
+    print(f"  Found {len(links)} articles — scraping ...")
+
     for url in sorted(links):
-        if scraped_count >= 70: break
-        scrape_page(url, "cricbuzz")
+        if scraped_count >= 70:
+            break
+        scrape_article(url, "times_of_india")
 
+
+# ── Source C: Indian Express player tag pages ─────────────────────────────────
+
+def scrape_ie_player_tags():
+    print("\n── Source C: Indian Express player tag pages ──")
+    domain    = "https://indianexpress.com"
+    path_frag = "/article/sports/cricket/"
+    kws       = config.INTERVIEW_KEYWORDS + ["ipl", "2025"]
+
+    links: set = set()
+    for tag_url in config.INDIAN_EXPRESS_TAGS:
+        found = collect_links(tag_url, domain, path_frag,
+                              filter_kws=kws, max_pages=2)
+        links |= found
+        time.sleep(config.REQUEST_DELAY)
+
+    # Exclude already-scraped URLs from Source A
+    links -= seen_urls
+    log(f"Source C total: {len(links)} new URLs from player tag pages")
+    print(f"  Found {len(links)} new articles — scraping ...")
+
+    for url in sorted(links):
+        if scraped_count >= 70:
+            break
+        scrape_article(url, "indian_express_player_tag")
+
+
+# ── Entry point ───────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    print("Starting IPL 2025 scraper — target ~70 documents")
+    print("=" * 60)
+    print("IPL 2025 Press Conference Scraper")
+    print("Sources: Indian Express (A + C) | Times of India (B)")
+    print("Target : ~70 documents | Delay: 2s between requests")
+    print("=" * 60)
     log("=== Scrape run started ===")
-    scrape_espn_match_reports()
-    scrape_espn_news()
-    scrape_cricbuzz()
-    print(f"\nDone. Scraped {scraped_count} documents → {config.DATA_DIR}")
+
+    scrape_indian_express_ipl()
+    scrape_times_of_india()
+    scrape_ie_player_tags()
+
+    print(f"\n{'=' * 60}")
+    print(f"Done. Scraped {scraped_count} documents → {config.DATA_DIR}")
+    print(f"Next step: python chunker.py")
     log(f"=== Scrape complete: {scraped_count} docs ===")
