@@ -6,6 +6,7 @@ Tests cover:
 Run: pytest tests/test_chunker.py -v
 
 Note: All 11 tests verified locally on Python 3.13 + tiktoken cl100k_base.
+Trigger: validate full claude-review → claude-implement Actions chain.
 """
 
 import sys
