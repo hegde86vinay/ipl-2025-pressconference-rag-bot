@@ -23,19 +23,25 @@ This step runs once (or incrementally when new chunks are added). The resulting 
 |-------|-----|------|----------------|---------|
 | `all-MiniLM-L6-v2` | 384 | 22 MB | ~1 000 chunks/min | Good |
 | `all-mpnet-base-v2` | 768 | 438 MB | ~200 chunks/min | Better |
-| `text-embedding-3-small` (OpenAI API) | 1536 | — | API latency | Best |
+| `text-embedding-3-small` (OpenAI API) | 1 536 | — | API latency | Excellent |
+| `amazon.titan-embed-text-v2:0` (AWS Bedrock) | 1 536 | — | API latency | Excellent |
 
 For a hobby project on M2 Air with 8 GB RAM, MiniLM hits the right tradeoff: fast enough to embed ~400 chunks in under 8 minutes, good enough for cricket quote retrieval where sentences are relatively short and domain-specific.
 
-**Why ChromaDB over FAISS / Pinecone?**
+> **AWS Bedrock alternative:** Titan Embeddings V2 produces 1 536-dim vectors with an 8 192-token context window (vs MiniLM's 256-token hard truncation), which means long chunks are fully encoded rather than silently truncated. See [`docs/bedrock.md`](bedrock.md) for the full migration path.
 
-| | ChromaDB | FAISS | Pinecone |
-|--|---------|-------|---------|
-| Setup | `pip install` | `pip install` + compile | Cloud account |
-| Persistence | Auto (SQLite + files) | Manual save/load | Cloud |
-| Metadata filtering | Built-in | Not built-in | Built-in |
-| Re-run safety | ID-based upsert | Manual dedup | ID-based |
-| Local-only | ✅ | ✅ | ❌ |
+**Why ChromaDB over FAISS / Pinecone / OpenSearch?**
+
+| | ChromaDB | FAISS | Pinecone | OpenSearch Serverless |
+|--|---------|-------|---------|----------------------|
+| Setup | `pip install` | `pip install` + compile | Cloud account | IAM + boto3 |
+| Persistence | Auto (SQLite + files) | Manual save/load | Cloud | Cloud (managed) |
+| Metadata filtering | Built-in | Not built-in | Built-in | Built-in |
+| Re-run safety | ID-based upsert | Manual dedup | ID-based | ID-based upsert |
+| Local-only | ✅ | ✅ | ❌ | ❌ |
+| Managed / HA | ❌ | ❌ | ✅ | ✅ |
+
+OpenSearch Serverless is the vector store used in the AWS Bedrock alternative — see [`docs/bedrock.md`](bedrock.md).
 
 **Why `device="cpu"` explicitly?**
 macOS MPS (Metal Performance Shaders) backend in PyTorch has known compatibility issues with `sentence-transformers` on some macOS + Python version combinations. Forcing CPU avoids silent correctness bugs in vector outputs.
