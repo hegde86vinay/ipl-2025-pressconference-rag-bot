@@ -4,6 +4,8 @@ A local RAG (Retrieval-Augmented Generation) pipeline to answer natural-language
 
 **Stack:** requests + BeautifulSoup → tiktoken → sentence-transformers + ChromaDB → Claude Haiku → Streamlit
 
+> **AWS Bedrock alternative:** See [`docs/bedrock.md`](docs/bedrock.md) for a full architectural walkthrough of running this pipeline on Amazon Bedrock Knowledge Bases (managed) or with Bedrock Titan Embeddings + OpenSearch Serverless (DIY), including detailed Mermaid diagrams and code diffs for both approaches.
+
 ---
 
 ## Architecture

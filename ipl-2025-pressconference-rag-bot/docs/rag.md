@@ -24,15 +24,18 @@ The module exposes both a Python API (`ask(question) → dict`) for the Streamli
 
 **Why Claude Haiku over GPT-3.5 / local LLMs?**
 
-| | Claude Haiku | GPT-3.5-turbo | Llama-3-8B (local) |
-|--|-------------|--------------|-------------------|
-| Latency | ~1 s | ~1 s | 20–60 s on M2 Air |
-| Quality (Q&A) | High | High | Medium |
-| Cost | $1/1M in | $0.50/1M in | Free |
-| Instruction following | Excellent | Good | Variable |
-| RAM needed | API only | API only | 8 GB+ |
+| | Claude Haiku (direct) | Claude Haiku (Bedrock) | GPT-3.5-turbo | Llama-3-8B (local) |
+|--|----------------------|----------------------|--------------|-------------------|
+| Latency | ~1 s | ~1–2 s | ~1 s | 20–60 s on M2 Air |
+| Quality (Q&A) | High | High (same model) | High | Medium |
+| Cost | $1/1M in | Bedrock on-demand | $0.50/1M in | Free |
+| Instruction following | Excellent | Excellent | Good | Variable |
+| RAM needed | API only | API only | API only | 8 GB+ |
+| Auth | `ANTHROPIC_API_KEY` | IAM Role | `OPENAI_API_KEY` | Local weights |
 
-Local LLMs are ruled out by the 8 GB RAM constraint on M2 Air — loading an 8B model leaves no headroom for the rest of the pipeline. Between the two API options, Haiku's instruction-following quality and explicit citation behaviour are noticeably stronger for this use case.
+Local LLMs are ruled out by the 8 GB RAM constraint on M2 Air — loading an 8B model leaves no headroom for the rest of the pipeline. Between the API options, Haiku's instruction-following quality and explicit citation behaviour are noticeably stronger for this use case.
+
+> **AWS Bedrock note:** Claude Haiku is also available via AWS Bedrock (`anthropic.claude-3-5-haiku-20241022-v1:0`). The model quality is identical — the difference is auth (IAM instead of an API key) and SDK (`boto3` + `bedrock-runtime` instead of the `anthropic` package). See [`docs/bedrock.md`](bedrock.md) for the full approach.
 
 **Why Top-K = 3?**
 Three chunks fit comfortably within Haiku's context window while keeping prompt cost low. Empirically, the third chunk rarely adds new information for a narrow factual question; raising to 5 increases cost by ~40% with marginal quality gain.
