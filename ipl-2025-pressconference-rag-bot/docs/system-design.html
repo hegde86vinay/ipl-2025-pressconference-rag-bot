@@ -1,0 +1,868 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>IPL 2025 Press Conference RAG Bot — System Design</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <style>
+    /* ── Reset & Tokens ─────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg:        #0d1117;
+      --surface:   #161b22;
+      --surface2:  #21262d;
+      --border:    #30363d;
+      --text:      #e6edf3;
+      --muted:     #8b949e;
+      --accent:    #58a6ff;
+      --accent2:   #3fb950;
+      --warn:      #d29922;
+      --danger:    #f85149;
+      --purple:    #bc8cff;
+      --teal:      #39d353;
+      --radius:    8px;
+      --sidebar-w: 260px;
+      --font-mono: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+    }
+
+    html { scroll-behavior: smooth; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.7;
+      display: flex;
+    }
+
+    /* ── Sidebar ────────────────────────────────────────────────────── */
+    nav#sidebar {
+      position: fixed; top: 0; left: 0;
+      width: var(--sidebar-w); height: 100vh;
+      background: var(--surface);
+      border-right: 1px solid var(--border);
+      overflow-y: auto; padding: 24px 0;
+      z-index: 100;
+    }
+    .nav-logo {
+      padding: 0 20px 20px;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 12px;
+    }
+    .nav-logo .badge {
+      font-size: 11px; font-weight: 600; letter-spacing: .05em;
+      background: #1c3a5e; color: var(--accent);
+      padding: 2px 8px; border-radius: 20px;
+      border: 1px solid var(--accent);
+      display: inline-block; margin-bottom: 8px;
+    }
+    .nav-logo h2 { font-size: 14px; color: var(--text); line-height: 1.4; }
+    nav#sidebar a {
+      display: block; padding: 6px 20px;
+      color: var(--muted); text-decoration: none;
+      font-size: 13px; transition: all .15s;
+      border-left: 3px solid transparent;
+    }
+    nav#sidebar a:hover, nav#sidebar a.active {
+      color: var(--accent); background: rgba(88,166,255,.08);
+      border-left-color: var(--accent);
+    }
+    .nav-section {
+      font-size: 11px; font-weight: 600; letter-spacing: .08em;
+      text-transform: uppercase; color: var(--muted);
+      padding: 16px 20px 4px;
+    }
+    .nav-sub { padding-left: 32px !important; font-size: 12px !important; }
+
+    /* ── Main content ───────────────────────────────────────────────── */
+    main {
+      margin-left: var(--sidebar-w);
+      max-width: 960px;
+      padding: 48px 48px 120px;
+      flex: 1;
+    }
+
+    /* ── Hero ───────────────────────────────────────────────────────── */
+    .hero {
+      background: linear-gradient(135deg, #0d2137 0%, #0d1117 60%);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 40px 48px;
+      margin-bottom: 48px;
+      position: relative; overflow: hidden;
+    }
+    .hero::before {
+      content: '🏏';
+      position: absolute; right: 40px; top: 30px;
+      font-size: 72px; opacity: .12;
+    }
+    .hero .tag-row { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+    .tag {
+      font-size: 11px; font-weight: 600; padding: 3px 10px;
+      border-radius: 20px; letter-spacing: .04em;
+    }
+    .tag-blue  { background:#1c3a5e; color:var(--accent);  border:1px solid var(--accent); }
+    .tag-green { background:#0d2c1a; color:var(--accent2); border:1px solid var(--accent2); }
+    .tag-purple{ background:#2a1f4e; color:var(--purple);  border:1px solid var(--purple); }
+    .tag-warn  { background:#2d2005; color:var(--warn);    border:1px solid var(--warn); }
+    .hero h1 { font-size: 28px; font-weight: 700; margin-bottom: 10px; line-height: 1.3; }
+    .hero p  { color: var(--muted); max-width: 620px; font-size: 15px; }
+    .hero .meta {
+      margin-top: 24px; display: flex; gap: 24px; flex-wrap: wrap;
+    }
+    .meta-item { font-size: 13px; color: var(--muted); }
+    .meta-item strong { color: var(--text); }
+
+    /* ── Section headings ───────────────────────────────────────────── */
+    section { margin-bottom: 56px; }
+    h2 {
+      font-size: 22px; font-weight: 700;
+      padding-bottom: 10px; margin-bottom: 24px;
+      border-bottom: 1px solid var(--border);
+      scroll-margin-top: 24px;
+    }
+    h2 .icon { margin-right: 8px; }
+    h3 { font-size: 16px; font-weight: 600; margin: 24px 0 12px; color: var(--accent); }
+    h4 { font-size: 14px; font-weight: 600; margin: 16px 0 8px; color: var(--purple); }
+    p  { margin-bottom: 14px; color: var(--text); font-size: 15px; }
+
+    /* ── Callout boxes ──────────────────────────────────────────────── */
+    .callout {
+      border-radius: var(--radius);
+      padding: 16px 20px;
+      margin: 20px 0;
+      font-size: 14px;
+      border-left: 4px solid;
+    }
+    .callout-blue   { background:#0d1f35; border-color:var(--accent);  color:#cdd9e5; }
+    .callout-green  { background:#0d2215; border-color:var(--accent2); color:#cdd9e5; }
+    .callout-warn   { background:#2b1d00; border-color:var(--warn);    color:#cdd9e5; }
+    .callout-danger { background:#2d0f0f; border-color:var(--danger);  color:#cdd9e5; }
+    .callout strong { display: block; margin-bottom: 4px; }
+
+    /* ── Tables ─────────────────────────────────────────────────────── */
+    table { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 14px; }
+    th { background: var(--surface2); color: var(--muted); text-align: left;
+         padding: 10px 14px; font-weight: 600; font-size: 12px;
+         text-transform: uppercase; letter-spacing: .06em; }
+    td { padding: 10px 14px; border-top: 1px solid var(--border); vertical-align: top; }
+    tr:hover td { background: rgba(255,255,255,.02); }
+    td code { font-size: 12px; }
+
+    /* ── Code ───────────────────────────────────────────────────────── */
+    code {
+      font-family: var(--font-mono);
+      background: var(--surface2); border: 1px solid var(--border);
+      padding: 2px 6px; border-radius: 4px; font-size: 13px;
+      color: #f0883e;
+    }
+    pre {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 20px 24px;
+      overflow-x: auto; margin: 16px 0;
+    }
+    pre code {
+      background: none; border: none; padding: 0;
+      font-size: 13px; color: var(--text); line-height: 1.6;
+    }
+    .comment { color: var(--muted); }
+    .kw { color: #ff7b72; }
+    .str { color: var(--accent2); }
+    .fn { color: #d2a8ff; }
+
+    /* ── Mermaid diagrams ───────────────────────────────────────────── */
+    .diagram-wrap {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 24px; margin: 20px 0;
+      overflow-x: auto; text-align: center;
+    }
+    .diagram-caption {
+      text-align: center; font-size: 12px;
+      color: var(--muted); margin-top: 12px;
+      font-style: italic;
+    }
+
+    /* ── Component cards ────────────────────────────────────────────── */
+    .card-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px,1fr)); gap: 16px; margin: 20px 0; }
+    .card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 20px;
+      transition: border-color .15s;
+    }
+    .card:hover { border-color: var(--accent); }
+    .card .card-icon { font-size: 28px; margin-bottom: 10px; }
+    .card h4 { color: var(--text); margin: 0 0 6px; font-size: 14px; }
+    .card p  { color: var(--muted); font-size: 13px; margin: 0; }
+
+    /* ── Step list ──────────────────────────────────────────────────── */
+    .steps { list-style: none; counter-reset: step; }
+    .steps li {
+      counter-increment: step;
+      display: flex; gap: 16px;
+      margin-bottom: 20px; align-items: flex-start;
+    }
+    .steps li::before {
+      content: counter(step);
+      min-width: 32px; height: 32px;
+      background: var(--accent); color: #000;
+      border-radius: 50%;
+      font-weight: 700; font-size: 13px;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0; margin-top: 2px;
+    }
+    .steps li .step-content h4 { margin-top: 0; color: var(--text); }
+    .steps li .step-content p  { margin: 0; font-size: 14px; color: var(--muted); }
+
+    /* ── Status badges ──────────────────────────────────────────────── */
+    .status-ok   { color: var(--accent2); font-weight: 600; }
+    .status-warn { color: var(--warn);    font-weight: 600; }
+    .status-bad  { color: var(--danger);  font-weight: 600; }
+
+    /* ── Horizontal rule ────────────────────────────────────────────── */
+    hr { border: none; border-top: 1px solid var(--border); margin: 32px 0; }
+
+    /* ── Footer ─────────────────────────────────────────────────────── */
+    footer {
+      margin-left: var(--sidebar-w);
+      padding: 24px 48px;
+      border-top: 1px solid var(--border);
+      color: var(--muted); font-size: 13px;
+      display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px;
+    }
+
+    /* ── Scroll highlight ───────────────────────────────────────────── */
+    :target { scroll-margin-top: 24px; }
+
+    @media (max-width: 768px) {
+      nav#sidebar { display: none; }
+      main, footer { margin-left: 0; padding: 24px 20px 60px; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ═══════════════════ SIDEBAR ═══════════════════ -->
+<nav id="sidebar">
+  <div class="nav-logo">
+    <div class="badge">SYSTEM DESIGN</div>
+    <h2>IPL 2025<br>RAG Bot</h2>
+  </div>
+
+  <div class="nav-section">Overview</div>
+  <a href="#overview">Project Summary</a>
+  <a href="#goals">Goals & Constraints</a>
+
+  <div class="nav-section">Architecture</div>
+  <a href="#high-level">High-Level Design</a>
+  <a href="#data-flow">Data Flow</a>
+  <a href="#folder">Folder Structure</a>
+
+  <div class="nav-section">Components</div>
+  <a href="#scraper"   class="nav-sub">① Scraper</a>
+  <a href="#chunker"   class="nav-sub">② Chunker</a>
+  <a href="#embedder"  class="nav-sub">③ Embedder</a>
+  <a href="#rag"       class="nav-sub">④ RAG Engine</a>
+  <a href="#ui"        class="nav-sub">⑤ Streamlit UI</a>
+  <a href="#config"    class="nav-sub">⑥ Config</a>
+
+  <div class="nav-section">CI / Automation</div>
+  <a href="#workflows">GitHub Actions</a>
+  <a href="#loop-break">Loop-Breaker</a>
+
+  <div class="nav-section">Tech Stack</div>
+  <a href="#techstack">Choices & Rationale</a>
+
+  <div class="nav-section">Operations</div>
+  <a href="#runbook">Run Book</a>
+  <a href="#limitations">Known Limitations</a>
+  <a href="#roadmap">Roadmap</a>
+</nav>
+
+<!-- ═══════════════════ MAIN ═══════════════════════ -->
+<main>
+
+  <!-- HERO -->
+  <div class="hero">
+    <div class="tag-row">
+      <span class="tag tag-blue">RAG Pipeline</span>
+      <span class="tag tag-green">Local-first</span>
+      <span class="tag tag-purple">Claude API</span>
+      <span class="tag tag-warn">IPL 2025</span>
+    </div>
+    <h1>IPL 2025 Press Conference<br>RAG Bot — System Design</h1>
+    <p>A fully local Retrieval-Augmented Generation pipeline for querying
+       IPL 2025 player interviews, captain reactions, and post-match press
+       conference content using natural language.</p>
+    <div class="meta">
+      <div class="meta-item"><strong>Platform</strong> macOS (M2 Air, 8 GB)</div>
+      <div class="meta-item"><strong>LLM</strong> Claude Haiku 4.5</div>
+      <div class="meta-item"><strong>Vector DB</strong> ChromaDB (local)</div>
+      <div class="meta-item"><strong>Embeddings</strong> all-MiniLM-L6-v2 (CPU)</div>
+      <div class="meta-item"><strong>Sources</strong> Indian Express · Times of India</div>
+    </div>
+  </div>
+
+  <!-- ── OVERVIEW ──────────────────────────────────── -->
+  <section id="overview">
+    <h2><span class="icon">📋</span>Project Summary</h2>
+    <p>This project is a <strong>hobby Gen-AI learning project</strong> that builds a
+    Retrieval-Augmented Generation (RAG) pipeline on a local MacBook Air M2. It
+    scrapes written IPL 2025 post-match content from public news sources, chunks and
+    embeds those documents into a local ChromaDB vector store, and then uses the
+    Claude Haiku API to answer natural-language questions grounded in that content.</p>
+    <p>The full pipeline runs <strong>entirely offline</strong> — no cloud vector DB,
+    no external compute. The only network calls at query time are to the Claude API.</p>
+
+    <div class="card-grid">
+      <div class="card"><div class="card-icon">🕷️</div><h4>Scraper</h4><p>Harvests 60–80 articles from Indian Express &amp; Times of India</p></div>
+      <div class="card"><div class="card-icon">✂️</div><h4>Chunker</h4><p>500-token windows with 50-token overlap using tiktoken</p></div>
+      <div class="card"><div class="card-icon">🔢</div><h4>Embedder</h4><p>Sentence-transformers on CPU → ChromaDB vector store</p></div>
+      <div class="card"><div class="card-icon">🧠</div><h4>RAG Engine</h4><p>Retrieve top-3 chunks → build prompt → Claude Haiku answer</p></div>
+      <div class="card"><div class="card-icon">💬</div><h4>Streamlit UI</h4><p>Chat interface with source expander and session history</p></div>
+      <div class="card"><div class="card-icon">🤖</div><h4>CI Workflows</h4><p>Claude reviewer + Claude implementer GitHub Actions chain</p></div>
+    </div>
+  </section>
+
+  <!-- ── GOALS ─────────────────────────────────────── -->
+  <section id="goals">
+    <h2><span class="icon">🎯</span>Goals &amp; Constraints</h2>
+    <table>
+      <tr><th>Dimension</th><th>Requirement</th><th>Decision</th></tr>
+      <tr><td>Storage</td><td>All local — no cloud vector DB</td><td>ChromaDB persisted to <code>vectorstore/chroma_db/</code></td></tr>
+      <tr><td>Rendering</td><td>No Selenium / headless browser</td><td>requests + BeautifulSoup only</td></tr>
+      <tr><td>Hardware</td><td>M2 Air, 8 GB RAM</td><td>CPU-only embeddings, <code>device="cpu"</code></td></tr>
+      <tr><td>LLM</td><td>Anthropic API</td><td>claude-haiku-4-5-20251001 (fast + cheap)</td></tr>
+      <tr><td>Secrets</td><td>Never hardcoded</td><td><code>.env</code> via python-dotenv, gitignored</td></tr>
+      <tr><td>File size</td><td>&lt; 150 lines per file</td><td>Helpers extracted; config centralised</td></tr>
+      <tr><td>Robustness</td><td>Never crash on bad URL</td><td>All HTTP calls wrapped in <code>safe_get()</code></td></tr>
+    </table>
+  </section>
+
+  <!-- ── HIGH-LEVEL ARCH ───────────────────────────── -->
+  <section id="high-level">
+    <h2><span class="icon">🏗️</span>High-Level Architecture</h2>
+    <p>The system has two distinct phases: an <strong>offline indexing pipeline</strong>
+    that runs once (or whenever you want fresh data), and an <strong>online query
+    pipeline</strong> triggered on every user question.</p>
+
+    <div class="diagram-wrap">
+      <div class="mermaid">
+flowchart TD
+    subgraph OFFLINE ["⚙️ Offline Indexing Pipeline (run once)"]
+        direction LR
+        S1["🌐 Indian Express<br/>IPL Section"] --> SC
+        S2["🌐 Times of India<br/>IPL Top-Stories"] --> SC
+        S3["🌐 IE Player<br/>Tag Pages"] --> SC
+        SC["scraper.py<br/>requests + BS4"] --> RAW["data/raw/<br/>*.txt  *.json"]
+        RAW --> CK["chunker.py<br/>tiktoken cl100k"]
+        CK --> CHK["data/chunks/<br/>chunks.json"]
+        CHK --> EM["embedder.py<br/>all-MiniLM-L6-v2<br/>device=cpu"]
+        EM --> VDB[("ChromaDB<br/>vectorstore/<br/>chroma_db/")]
+    end
+
+    subgraph ONLINE ["💬 Online Query Pipeline (every question)"]
+        direction LR
+        Q["User Question"] --> RQ["rag.py<br/>embed question"]
+        RQ --> VDB2[("ChromaDB<br/>top-3 chunks")]
+        VDB2 --> BP["build_prompt()<br/>numbered context"]
+        BP --> CL["Claude Haiku API<br/>claude-haiku-4-5"]
+        CL --> ANS["Answer + Sources"]
+        ANS --> UI["Streamlit UI<br/>app.py"]
+    end
+
+    VDB -.->|"persisted on disk"| VDB2
+      </div>
+      <div class="diagram-caption">Figure 1 — Full system architecture: offline indexing (top) feeds the online query pipeline (bottom)</div>
+    </div>
+  </section>
+
+  <!-- ── DATA FLOW ─────────────────────────────────── -->
+  <section id="data-flow">
+    <h2><span class="icon">🔄</span>Data Flow</h2>
+    <p>End-to-end sequence from a user question to a grounded answer:</p>
+
+    <div class="diagram-wrap">
+      <div class="mermaid">
+sequenceDiagram
+    actor User
+    participant UI   as Streamlit (app.py)
+    participant RAG  as RAG Engine (rag.py)
+    participant EMB  as Embedder model
+    participant VDB  as ChromaDB
+    participant ANT  as Claude API
+
+    User  ->> UI   : Types question
+    UI    ->> RAG  : ask(question)
+    RAG   ->> EMB  : embed(question)
+    EMB  -->> RAG  : query_vector [384-dim]
+    RAG   ->> VDB  : query(vector, top_k=3)
+    VDB  -->> RAG  : [{text, metadata}] × 3
+    RAG   ->> RAG  : build_prompt(question, chunks)
+    RAG   ->> ANT  : messages API (system + user)
+    ANT  -->> RAG  : answer text
+    RAG  -->> UI   : {answer, sources[]}
+    UI   -->> User : Renders answer + source expander
+      </div>
+      <div class="diagram-caption">Figure 2 — Query sequence diagram: question → embed → retrieve → Claude → render</div>
+    </div>
+
+    <h3>Indexing Data Flow</h3>
+    <div class="diagram-wrap">
+      <div class="mermaid">
+sequenceDiagram
+    participant SC  as scraper.py
+    participant FS  as data/raw/
+    participant CK  as chunker.py
+    participant EM  as embedder.py
+    participant VDB as ChromaDB
+
+    SC  ->> FS  : Save article.txt + article.json
+    Note over SC,FS: title, source_url, date,<br/>teams, author per doc
+
+    CK  ->> FS  : Load all *.txt + *.json sidecars
+    CK  ->> CK  : tiktoken encode → 500-token windows<br/>with 50-token overlap
+    CK  ->> FS  : Write data/chunks/chunks.json
+    Note over CK,FS: each chunk carries full metadata
+
+    EM  ->> FS  : Load chunks.json
+    EM  ->> EM  : Batch embed (32 at a time)<br/>all-MiniLM-L6-v2 CPU
+    EM  ->> VDB : upsert(id=sha256_hash, vector, metadata)
+    Note over EM,VDB: Skips already-embedded chunks<br/>on re-run (idempotent)
+      </div>
+      <div class="diagram-caption">Figure 3 — Indexing pipeline sequence: scrape → chunk → embed → store</div>
+    </div>
+  </section>
+
+  <!-- ── FOLDER STRUCTURE ──────────────────────────── -->
+  <section id="folder">
+    <h2><span class="icon">📁</span>Folder Structure</h2>
+    <pre><code>ipl-2025-pressconference-rag-bot/
+│
+├── <span style="color:var(--accent)">config.py</span>          <span class="comment"># all constants: paths, models, URLs, keywords</span>
+├── <span style="color:var(--accent)">scraper.py</span>         <span class="comment"># Source A (Indian Express) + B (TOI) + C (IE tags)</span>
+├── <span style="color:var(--accent)">chunker.py</span>         <span class="comment"># tiktoken-based 500/50 sliding window</span>
+├── <span style="color:var(--accent)">embedder.py</span>        <span class="comment"># sentence-transformers → ChromaDB</span>
+├── <span style="color:var(--accent)">rag.py</span>             <span class="comment"># retrieve + prompt build + Claude call</span>
+├── <span style="color:var(--accent)">app.py</span>             <span class="comment"># Streamlit chat UI</span>
+│
+├── requirements.txt   <span class="comment"># pinned deps</span>
+├── .env.example       <span class="comment"># ANTHROPIC_API_KEY=your-key-here</span>
+├── .gitignore         <span class="comment"># .env, vectorstore/, data/, __pycache__/</span>
+│
+├── <span style="color:var(--purple)">tests/</span>
+│   └── test_chunker.py  <span class="comment"># 11 pytest tests (chunk_text + make_chunk_id)</span>
+│
+├── <span style="color:var(--purple)">docs/</span>
+│   ├── scraper.md       <span class="comment"># scraper deep-dive + Mermaid diagrams</span>
+│   ├── chunker.md       <span class="comment"># chunker deep-dive + sequence diagram</span>
+│   ├── embedder.md      <span class="comment"># embedder deep-dive + sequence diagram</span>
+│   ├── rag.md           <span class="comment"># RAG engine deep-dive + sequence diagram</span>
+│   └── system-design.html  <span class="comment"># ← this document</span>
+│
+├── <span style="color:var(--accent2)">data/</span>
+│   ├── raw/             <span class="comment"># scraped *.txt + *.json sidecar pairs</span>
+│   ├── chunks/          <span class="comment"># chunks.json (all chunks with metadata)</span>
+│   └── scrape_log.txt   <span class="comment"># per-URL scrape log (skips + errors)</span>
+│
+└── <span style="color:var(--accent2)">vectorstore/</span>
+    └── chroma_db/       <span class="comment"># ChromaDB persistent store (gitignored)</span></code></pre>
+  </section>
+
+  <!-- ══════════════════ COMPONENTS ══════════════════ -->
+
+  <!-- SCRAPER -->
+  <section id="scraper">
+    <h2><span class="icon">🕷️</span>① Scraper (<code>scraper.py</code>)</h2>
+    <p>Responsible for harvesting raw text from public cricket news sources and
+    saving it as plain-text documents with JSON metadata sidecars.</p>
+
+    <div class="callout callout-warn">
+      <strong>⚠️ Source Change (March 2026)</strong>
+      Original sources (ESPNcricinfo, Cricbuzz) became unavailable: ESPNcricinfo returns
+      <code>403</code> (Cloudflare) and Cricbuzz is a JS-rendered React shell (empty HTML
+      with <code>requests</code>). Replaced with Indian Express and Times of India —
+      both return full HTML with <code>200 OK</code>.
+    </div>
+
+    <h3>Sources</h3>
+    <table>
+      <tr><th>Source</th><th>Index URL</th><th>Article Pattern</th><th>Content Type</th></tr>
+      <tr>
+        <td><strong>A</strong> Indian Express IPL</td>
+        <td><code>/section/sports/ipl/</code></td>
+        <td><code>/article/sports/cricket/&lt;slug&gt;-&lt;id&gt;/</code></td>
+        <td>Captain quotes, post-match reports, coach interviews</td>
+      </tr>
+      <tr>
+        <td><strong>B</strong> Times of India</td>
+        <td><code>/sports/cricket/ipl</code></td>
+        <td><code>/sports/cricket/ipl/top-stories/.../articleshow/&lt;id&gt;.cms</code></td>
+        <td>Player/coach press conference content, highest text density</td>
+      </tr>
+      <tr>
+        <td><strong>C</strong> IE Player Tags</td>
+        <td>Per-player tag pages (Kohli, Rohit, Dhoni, Hardik, Gill)</td>
+        <td><code>/article/sports/cricket/&lt;slug&gt;-&lt;id&gt;/</code></td>
+        <td>Deep per-player interview archive</td>
+      </tr>
+    </table>
+
+    <h3>Key Design Decisions</h3>
+    <table>
+      <tr><th>Decision</th><th>Rationale</th></tr>
+      <tr><td><code>time.sleep(2)</code> between every request</td><td>Polite scraping — avoids rate limits and respects server load</td></tr>
+      <tr><td><code>seen_urls</code> set for dedup</td><td>Same article can appear across multiple source index pages</td></tr>
+      <tr><td>Skip if &lt; 150 words</td><td>Filters stubs, redirect pages, and navigation-only pages</td></tr>
+      <tr><td>TOI path scoped to <code>/sports/cricket/ipl/</code></td><td>Prevents Bollywood/entertainment articles that mention IPL in passing</td></tr>
+      <tr><td>Pagination via <code>?page=N</code> with early stop</td><td>Reaches archived IPL 2025 content (10+ months old); stops when no new links found</td></tr>
+      <tr><td><code>extract_teams()</code> on every doc</td><td>Auto-tags documents with IPL team names for metadata filtering</td></tr>
+    </table>
+
+    <div class="diagram-wrap">
+      <div class="mermaid">
+flowchart LR
+    A["collect_links()\nindex page + pagination"] --> B{"filter_kws\nmatch?"}
+    B -->|yes| C["seen_urls\ndedup check"]
+    B -->|no | X1["skip"]
+    C -->|new | D["safe_get(article_url)"]
+    C -->|seen| X2["skip"]
+    D -->|200| E["extract article\ncontainer"]
+    D -->|403/404/err| X3["log + skip"]
+    E --> F{"word count\n≥ 150?"}
+    F -->|yes| G["save .txt\n+ .json sidecar"]
+    F -->|no | X4["log + skip"]
+    G --> H["scraped_count++\nprint progress"]
+      </div>
+      <div class="diagram-caption">Figure 4 — Scraper decision flow per article URL</div>
+    </div>
+  </section>
+
+  <!-- CHUNKER -->
+  <section id="chunker">
+    <h2><span class="icon">✂️</span>② Chunker (<code>chunker.py</code>)</h2>
+    <p>Loads every raw document, splits it into overlapping token windows, attaches
+    the full metadata from the JSON sidecar, and writes all chunks to a single
+    <code>chunks.json</code> file.</p>
+
+    <h3>Chunking Strategy</h3>
+    <table>
+      <tr><th>Parameter</th><th>Value</th><th>Why</th></tr>
+      <tr><td>Encoder</td><td><code>cl100k_base</code> (tiktoken)</td><td>Same tokeniser as Claude — accurate token counting</td></tr>
+      <tr><td>Chunk size</td><td>500 tokens</td><td>Fits comfortably in Claude's context window while providing enough context per chunk</td></tr>
+      <tr><td>Overlap</td><td>50 tokens</td><td>Prevents important sentences being split across chunk boundaries</td></tr>
+      <tr><td>Minimum doc</td><td>150 words</td><td>Already filtered at scrape time; chunker inherits this guard</td></tr>
+    </table>
+
+    <h3>Chunk Schema</h3>
+    <pre><code>{
+  <span class="str">"id"</span>:           <span class="str">"a3f2c1b4e5d60789"</span>,   <span class="comment">// SHA-256 of source_url::chunk_index</span>
+  <span class="str">"text"</span>:         <span class="str">"Virat Kohli said after the match..."</span>,
+  <span class="str">"chunk_index"</span>:  <span class="fn">0</span>,
+  <span class="str">"total_chunks"</span>: <span class="fn">4</span>,
+  <span class="str">"source_url"</span>:   <span class="str">"https://indianexpress.com/article/..."</span>,
+  <span class="str">"title"</span>:        <span class="str">"Kohli on RCB's title win"</span>,
+  <span class="str">"date"</span>:         <span class="str">"2025-06-03"</span>,
+  <span class="str">"teams"</span>:        [<span class="str">"RCB"</span>, <span class="str">"PBKS"</span>],
+  <span class="str">"match_number"</span>: <span class="str">""</span>,
+  <span class="str">"author"</span>:       <span class="str">""</span>,
+  <span class="str">"source"</span>:       <span class="str">"indian_express"</span>
+}</code></pre>
+  </section>
+
+  <!-- EMBEDDER -->
+  <section id="embedder">
+    <h2><span class="icon">🔢</span>③ Embedder (<code>embedder.py</code>)</h2>
+    <p>Loads <code>chunks.json</code>, converts each chunk's text to a 384-dimensional
+    dense vector using <strong>all-MiniLM-L6-v2</strong>, and upserts into ChromaDB.
+    Designed to be idempotent — safe to re-run without duplicating data.</p>
+
+    <h3>Model Choice: all-MiniLM-L6-v2</h3>
+    <table>
+      <tr><th>Property</th><th>Value</th></tr>
+      <tr><td>Dimensions</td><td>384</td></tr>
+      <tr><td>Parameters</td><td>~22M</td></tr>
+      <tr><td>Max sequence</td><td>256 tokens</td></tr>
+      <tr><td>RAM footprint</td><td>~90 MB</td></tr>
+      <tr><td>Speed (M2 CPU)</td><td>~800 chunks/min</td></tr>
+      <tr><td>MTEB score</td><td>Strong on semantic similarity tasks</td></tr>
+    </table>
+    <div class="callout callout-blue">
+      <strong>Why not MPS (Apple GPU)?</strong>
+      sentence-transformers has known compatibility issues with MPS on macOS.
+      <code>device="cpu"</code> is explicit to prevent silent wrong results or crashes.
+    </div>
+
+    <h3>Idempotency</h3>
+    <p>Each chunk's <code>id</code> is a 16-char SHA-256 of <code>source_url::chunk_index</code>.
+    On re-run, ChromaDB's <code>upsert</code> is used — existing chunks are skipped,
+    only new ones are added. This means you can run <code>python embedder.py</code>
+    safely after scraping more articles without re-embedding everything.</p>
+  </section>
+
+  <!-- RAG ENGINE -->
+  <section id="rag">
+    <h2><span class="icon">🧠</span>④ RAG Engine (<code>rag.py</code>)</h2>
+    <p>The query engine: embeds the user's question, retrieves the top-3 most
+    relevant chunks from ChromaDB, injects them as numbered context into a
+    carefully crafted prompt, and calls the Claude API.</p>
+
+    <h3>Prompt Design</h3>
+    <pre><code><span class="kw">SYSTEM:</span>
+<span class="str">"You are an expert IPL cricket analyst with access to IPL 2025 press
+conference transcripts, match reports, and player interviews.
+Answer questions using ONLY the provided context. If the context does
+not contain enough information, say so clearly.
+Always cite which match or interview your answer comes from."</span>
+
+<span class="kw">USER:</span>
+<span class="str">Context [1]: &lt;chunk text&gt;  (source: Indian Express, 2025-05-14, teams: RCB)
+Context [2]: &lt;chunk text&gt;  (source: Times of India, 2025-06-03, teams: RCB, PBKS)
+Context [3]: &lt;chunk text&gt;  (source: Indian Express, 2025-06-03, teams: RCB)
+
+Question: What did Virat Kohli say after RCB won the IPL 2025 final?</span></code></pre>
+
+    <h3>Public API</h3>
+    <table>
+      <tr><th>Function</th><th>Description</th></tr>
+      <tr><td><code>load_retriever()</code></td><td>Initialises ChromaDB client + embedding model. Called once at startup.</td></tr>
+      <tr><td><code>retrieve(question, top_k=3)</code></td><td>Embeds the question and returns top-K chunks with metadata.</td></tr>
+      <tr><td><code>build_prompt(question, chunks)</code></td><td>Formats numbered context blocks + question into the final user message.</td></tr>
+      <tr><td><code>ask(question)</code></td><td>Full pipeline: retrieve → build prompt → Claude API → return answer + sources.</td></tr>
+    </table>
+
+    <h3>Model: claude-haiku-4-5-20251001</h3>
+    <div class="callout callout-blue">
+      Haiku was chosen over Sonnet for this project because query latency matters
+      for a chat UI and the task (Q&A over retrieved context) doesn't need
+      Sonnet-level reasoning. Cost is ~20× cheaper per token than Sonnet.
+    </div>
+  </section>
+
+  <!-- STREAMLIT UI -->
+  <section id="ui">
+    <h2><span class="icon">💬</span>⑤ Streamlit UI (<code>app.py</code>)</h2>
+    <p>A minimal but functional chat interface that wraps <code>rag.py</code>.</p>
+
+    <h3>Features</h3>
+    <ul style="padding-left:20px; margin-bottom:16px;">
+      <li style="margin-bottom:8px"><code>st.chat_input</code> — persistent text input, clears after each send</li>
+      <li style="margin-bottom:8px"><code>st.chat_message</code> — alternating user/assistant bubbles with full history</li>
+      <li style="margin-bottom:8px"><strong>Sources expander</strong> — after each answer: title, date, teams, URL per chunk</li>
+      <li style="margin-bottom:8px"><strong>Sidebar stats</strong> — total docs, total chunks, collection name, model, last embed time</li>
+      <li style="margin-bottom:8px"><strong>Session state</strong> — conversation history persists across reruns in the same session</li>
+      <li style="margin-bottom:8px"><strong>Spinner</strong> — shows while Claude API call is in-flight</li>
+    </ul>
+  </section>
+
+  <!-- CONFIG -->
+  <section id="config">
+    <h2><span class="icon">⚙️</span>⑥ Config (<code>config.py</code>)</h2>
+    <p>Single source of truth for all constants. No magic strings anywhere in the codebase.</p>
+    <pre><code>DATA_DIR         = <span class="str">"data/raw/"</span>
+CHUNKS_PATH      = <span class="str">"data/chunks/chunks.json"</span>
+VECTORSTORE_DIR  = <span class="str">"vectorstore/chroma_db/"</span>
+COLLECTION_NAME  = <span class="str">"ipl_2025_presscon"</span>
+EMBED_MODEL      = <span class="str">"all-MiniLM-L6-v2"</span>
+LLM_MODEL        = <span class="str">"claude-haiku-4-5-20251001"</span>
+TOP_K            = <span class="fn">3</span>
+CHUNK_SIZE       = <span class="fn">500</span>
+CHUNK_OVERLAP    = <span class="fn">50</span>
+MIN_DOC_WORDS    = <span class="fn">150</span>
+REQUEST_DELAY    = <span class="fn">2</span>   <span class="comment"># seconds</span></code></pre>
+  </section>
+
+  <!-- ── GITHUB ACTIONS ────────────────────────────── -->
+  <section id="workflows">
+    <h2><span class="icon">🤖</span>GitHub Actions — CI Automation</h2>
+    <p>Two chained workflows form an automated code review and implementation loop
+    on every pull request to <code>main</code>.</p>
+
+    <div class="diagram-wrap">
+      <div class="mermaid">
+flowchart TD
+    PUSH["Developer pushes\nto feature branch"] --> PR["Pull Request\nopened / updated"]
+    PR --> REV["claude-review.yml\n(pull_request trigger)"]
+    REV --> BC{"Last commit\nauthor?"}
+    BC -->|"human"| CREV["Call Claude API\nFresh-eyes review\n(diff only — no prior context)"]
+    BC -->|"claude-implement-bot"| SKIP["Post: Human Review\nRequired — stop loop"]
+    CREV --> RCOM["Post structured\nreview comment on PR"]
+    RCOM --> IMP["claude-implement.yml\n(workflow_run trigger)"]
+    IMP --> FETCH["Fetch review comment\nfrom PR via GitHub API"]
+    FETCH --> IMPL["Call Claude API\nImplement Suggestions\n(code + review only)"]
+    IMPL --> TEST["Run pytest tests/"]
+    TEST -->|"pass"| COMMIT["Commit changes\nto feature branch"]
+    TEST -->|"fail"| NOCOM["No commit\nlog failure"]
+    COMMIT --> REPORT["Post implementation\nreport on PR"]
+    NOCOM  --> REPORT
+    REPORT --> HUMAN["👤 Human reviews\nand approves"]
+      </div>
+      <div class="diagram-caption">Figure 5 — GitHub Actions review → implement chain with loop-breaker</div>
+    </div>
+  </section>
+
+  <!-- LOOP BREAKER -->
+  <section id="loop-break">
+    <h2><span class="icon">🔁</span>Loop-Breaker Pattern</h2>
+    <p>Without a guard, the implement bot's auto-commit would re-trigger the review
+    workflow indefinitely. The loop-breaker prevents this:</p>
+
+    <div class="callout callout-green">
+      <strong>How it works</strong>
+      At the start of <code>claude-review.yml</code>, the last commit author is read
+      via <code>git log -1 --format='%an'</code>. If it equals
+      <code>claude-implement-bot</code>, all Claude API steps are skipped and a
+      "Human Review Required" comment is posted instead. The chain stops there.
+    </div>
+
+    <table>
+      <tr><th>Commit Author</th><th>claude-review behaviour</th><th>claude-implement behaviour</th></tr>
+      <tr><td>Human developer</td><td class="status-ok">Runs full fresh-eyes review</td><td class="status-ok">Triggers after review completes</td></tr>
+      <tr><td><code>claude-implement-bot</code></td><td class="status-warn">Skips review — posts human-review notice</td><td>Does NOT re-trigger (workflow_run depends on review succeeding with a new review comment)</td></tr>
+    </table>
+  </section>
+
+  <!-- ── TECH STACK ─────────────────────────────────── -->
+  <section id="techstack">
+    <h2><span class="icon">🛠️</span>Tech Stack &amp; Rationale</h2>
+    <table>
+      <tr><th>Layer</th><th>Library</th><th>Version</th><th>Why chosen</th></tr>
+      <tr><td>Scraping</td><td>requests + BeautifulSoup4</td><td>latest</td><td>Lightweight, no browser needed; sufficient for HTML-rendered news sites</td></tr>
+      <tr><td>Tokenisation</td><td>tiktoken</td><td>latest</td><td>Same encoder as Claude — accurate token counts, fast</td></tr>
+      <tr><td>Embeddings</td><td>sentence-transformers</td><td>latest</td><td>Local, CPU-friendly, all-MiniLM-L6-v2 is a strong semantic similarity model</td></tr>
+      <tr><td>Vector DB</td><td>ChromaDB</td><td>latest</td><td>Local-first, persistent, Python-native, no server process required</td></tr>
+      <tr><td>LLM</td><td>Anthropic Claude Haiku 4.5</td><td>anthropic SDK</td><td>Fast, cheap, excellent at grounded Q&amp;A over retrieved context</td></tr>
+      <tr><td>UI</td><td>Streamlit</td><td>latest</td><td>Instant chat UI in pure Python — no frontend code needed</td></tr>
+      <tr><td>Secrets</td><td>python-dotenv</td><td>latest</td><td>Standard <code>.env</code> loading, gitignored</td></tr>
+      <tr><td>Testing</td><td>pytest</td><td>latest</td><td>Simple, idiomatic Python testing</td></tr>
+    </table>
+  </section>
+
+  <!-- ── RUNBOOK ─────────────────────────────────────── -->
+  <section id="runbook">
+    <h2><span class="icon">📖</span>Run Book</h2>
+
+    <h3>First-time setup</h3>
+    <pre><code><span class="comment"># 1. Clone and install</span>
+git clone https://github.com/hegde86vinay/ipl-2025-pressconference-rag-bot
+cd ipl-2025-pressconference-rag-bot
+pip3 install -r requirements.txt
+
+<span class="comment"># 2. Add your Anthropic API key</span>
+cp .env.example .env
+<span class="comment"># edit .env → ANTHROPIC_API_KEY=sk-ant-...</span></code></pre>
+
+    <h3>Pipeline steps</h3>
+    <ol class="steps">
+      <li><div class="step-content"><h4>Scrape articles (~25–35 mins)</h4><p><code>python3 scraper.py</code> — harvests 60–80 docs into <code>data/raw/</code>. Monitor <code>data/scrape_log.txt</code> for errors.</p></div></li>
+      <li><div class="step-content"><h4>Chunk documents (~10 secs)</h4><p><code>python3 chunker.py</code> — splits docs into 500-token windows, writes <code>data/chunks/chunks.json</code>.</p></div></li>
+      <li><div class="step-content"><h4>Embed into ChromaDB (~5–8 mins)</h4><p><code>python3 embedder.py</code> — encodes chunks with all-MiniLM-L6-v2 (CPU), upserts to <code>vectorstore/chroma_db/</code>.</p></div></li>
+      <li><div class="step-content"><h4>Launch chat UI</h4><p><code>streamlit run app.py</code> — opens <code>localhost:8501</code>. Start asking questions.</p></div></li>
+    </ol>
+
+    <h3>Example questions</h3>
+    <pre><code>"What did Virat Kohli say after RCB won the IPL 2025 final?"
+"How did captains react to the suspension in May 2025?"
+"Which coaches talked about the impact player rule?"
+"What did Suryakumar Yadav say about MI's batting in 2025?"
+"How did Punjab Kings captain react after losing the final?"
+"Which captains mentioned pitch conditions most often?"
+"What reasons did coaches give for losing close matches?"
+"How did Dhoni describe CSK's bowling strategy in 2025?"</code></pre>
+  </section>
+
+  <!-- ── KNOWN LIMITATIONS ──────────────────────────── -->
+  <section id="limitations">
+    <h2><span class="icon">⚠️</span>Known Limitations</h2>
+    <table>
+      <tr><th>Limitation</th><th>Impact</th><th>Mitigation</th></tr>
+      <tr>
+        <td>ESPNcricinfo &amp; Cricbuzz blocked</td>
+        <td>No match scorecards or official press conference transcripts</td>
+        <td>Using Indian Express + TOI which carry quoted press conference excerpts</td>
+      </tr>
+      <tr>
+        <td>Content is 10+ months old (IPL 2025: Mar–Jun 2025)</td>
+        <td>Some source URLs may have rotated or been archived</td>
+        <td>Pagination + tag pages reach historical archive; re-scrape periodically</td>
+      </tr>
+      <tr>
+        <td>all-MiniLM-L6-v2 max sequence = 256 tokens</td>
+        <td>Chunks longer than 256 tokens get silently truncated at embedding time</td>
+        <td>500-token chunks are text but ~200 unique tokens; acceptable for most press conf text</td>
+      </tr>
+      <tr>
+        <td>TOP_K = 3 chunks per query</td>
+        <td>May miss relevant context for broad questions</td>
+        <td>Configurable via <code>config.TOP_K</code>; increase to 5–8 for richer answers</td>
+      </tr>
+      <tr>
+        <td>No authentication on Streamlit app</td>
+        <td>Anyone on the same network can access it</td>
+        <td>Local development only; add Streamlit auth if exposed publicly</td>
+      </tr>
+    </table>
+  </section>
+
+  <!-- ── ROADMAP ─────────────────────────────────────── -->
+  <section id="roadmap">
+    <h2><span class="icon">🗺️</span>Roadmap</h2>
+    <table>
+      <tr><th>Priority</th><th>Enhancement</th><th>Notes</th></tr>
+      <tr><td class="status-ok">P1</td><td>Run full scraper and complete the indexing pipeline</td><td>Merge PR #5 → git pull → python3 scraper.py → chunker → embedder</td></tr>
+      <tr><td class="status-ok">P1</td><td>Test Streamlit chat UI with real data</td><td>Validate answers with example questions from README</td></tr>
+      <tr><td class="status-warn">P2</td><td>Add metadata filtering to retrieval</td><td>Filter by team, date range, or source in the query</td></tr>
+      <tr><td class="status-warn">P2</td><td>Add unit tests for <code>embedder.py</code> and <code>rag.py</code></td><td>Mock ChromaDB + Claude API for CI-safe tests</td></tr>
+      <tr><td class="status-warn">P2</td><td>Increase TOP_K to 5, evaluate answer quality</td><td>Trade-off: richer context vs prompt length</td></tr>
+      <tr><td>P3</td><td>Add Cricbuzz support via Playwright</td><td>Would require removing the no-Selenium constraint</td></tr>
+      <tr><td>P3</td><td>Scheduled re-scraping via GitHub Actions</td><td>Cron job to refresh data for ongoing seasons</td></tr>
+      <tr><td>P3</td><td>Upgrade to Claude Sonnet for complex queries</td><td>Model can be changed via <code>config.LLM_MODEL</code></td></tr>
+    </table>
+  </section>
+
+</main>
+
+<!-- ═══════════════════ FOOTER ═════════════════════ -->
+<footer>
+  <span>IPL 2025 Press Conference RAG Bot — System Design Document</span>
+  <span>Built with Claude Code · <a href="https://github.com/hegde86vinay/ipl-2025-pressconference-rag-bot" style="color:var(--accent);text-decoration:none;">GitHub Repository</a></span>
+</footer>
+
+<script>
+  // Initialise Mermaid with dark theme
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: 'dark',
+    themeVariables: {
+      background:       '#161b22',
+      primaryColor:     '#1c3a5e',
+      primaryTextColor: '#e6edf3',
+      primaryBorderColor:'#30363d',
+      lineColor:        '#58a6ff',
+      secondaryColor:   '#21262d',
+      tertiaryColor:    '#0d1117',
+      edgeLabelBackground:'#161b22',
+      clusterBkg:       '#0d1117',
+      titleColor:       '#e6edf3',
+    },
+    flowchart: { curve: 'basis', useMaxWidth: true },
+    sequence:  { useMaxWidth: true, mirrorActors: false },
+  });
+
+  // Highlight active nav link on scroll
+  const sections = document.querySelectorAll('section[id], div[id]');
+  const navLinks  = document.querySelectorAll('nav#sidebar a');
+  const observer  = new IntersectionObserver(entries => {
+    entries.forEach(e => {
+      if (e.isIntersecting) {
+        navLinks.forEach(a => a.classList.remove('active'));
+        const link = document.querySelector(`nav a[href="#${e.target.id}"]`);
+        if (link) link.classList.add('active');
+      }
+    });
+  }, { rootMargin: '-20% 0px -70% 0px' });
+  sections.forEach(s => observer.observe(s));
+</script>
+</body>
+</html>
