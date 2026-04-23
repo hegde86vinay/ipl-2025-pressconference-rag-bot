@@ -1,0 +1,61 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "ipl-fantasy (Next.js)",
+      "cwd": "/Users/vinayhegde/ClaudeProjects/ipl-fantasy",
+      "runtimeExecutable": "/opt/homebrew/bin/node",
+      "runtimeArgs": ["node_modules/.bin/next", "dev", "-p", "3001"],
+      "port": 3001
+    },
+    {
+      "name": "cache-visualizer",
+      "cwd": "/Users/vinayhegde/ClaudeProjects/cache-visualizer",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
+      "port": 3000
+    },
+    {
+      "name": "ipl-dashboard (Next.js)",
+      "cwd": "/Users/vinayhegde/ClaudeProjects/ipl-dashboard",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
+      "port": 3000
+    },
+    {
+      "name": "mi_bridge (FastAPI)",
+      "cwd": "/Users/vinayhegde/ClaudeProjects/mi_bridge",
+      "runtimeExecutable": "uvicorn",
+      "runtimeArgs": ["server:app", "--host", "0.0.0.0", "--port", "8000"],
+      "port": 8000
+    },
+    {
+      "name": "photo-system backend (FastAPI)",
+      "cwd": "/Users/vinayhegde/ClaudeProjects/photo-system/backend",
+      "runtimeExecutable": "uvicorn",
+      "runtimeArgs": ["main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"],
+      "port": 8000
+    },
+    {
+      "name": "photo-system (docker-compose)",
+      "cwd": "/Users/vinayhegde/ClaudeProjects/photo-system",
+      "runtimeExecutable": "docker-compose",
+      "runtimeArgs": ["up"],
+      "port": 3000
+    },
+    {
+      "name": "field-monitor-preview",
+      "cwd": "/Users/vinayhegde/ClaudeProjects/field-monitor",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "http.server", "8765", "--directory", "reports"],
+      "port": 8765
+    },
+    {
+      "name": "system-design-docs",
+      "cwd": "/Users/vinayhegde/ClaudeProjects/system-design-docs",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "http.server", "8766", "--directory", "docs"],
+      "port": 8766
+    }
+  ]
+}
